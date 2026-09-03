@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de Ferramentas</title>
+<style>
+:root{--bg:#f3f6fa;--card:#fff;--text:#172033;--muted:#697386;--primary:#1f5eff;--green:#16a34a;--red:#dc2626;--orange:#ea8a00;--border:#dfe5ee;--shadow:0 8px 25px rgba(22,35,60,.08)}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+header{background:#14213d;color:white;padding:20px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:25px}header p{margin:5px 0 0;color:#cbd5e1;font-size:13px}
+.clock{font-weight:bold;font-size:14px;text-align:right}
+.container{max-width:1250px;margin:25px auto;padding:0 18px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+.card .n{font-size:28px;font-weight:800}.card .l{color:var(--muted);font-size:13px;margin-top:5px}
+.toolbar{background:white;border:1px solid var(--border);padding:15px;border-radius:14px;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;box-shadow:var(--shadow)}
+input,select{padding:11px 12px;border:1px solid #ccd5e1;border-radius:9px;font-size:14px;background:#fff}
+input{min-width:180px}.toolbar input{flex:1;min-width:220px}
+button{border:0;border-radius:9px;padding:11px 14px;font-weight:700;cursor:pointer}
+.btn-primary{background:var(--primary);color:white}.btn-green{background:var(--green);color:white}.btn-orange{background:var(--orange);color:white}.btn-red{background:var(--red);color:white}.btn-gray{background:#e8edf4;color:#273449}
+.panel{background:white;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.panel-head{padding:17px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px}.panel-head h2{font-size:18px;margin:0}
+.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:850px}th,td{padding:12px 13px;border-bottom:1px solid #edf0f5;text-align:left;font-size:13px}th{background:#f8fafc;color:#526075}
+.badge{display:inline-block;padding:6px 9px;border-radius:999px;font-size:11px;font-weight:800}.disponivel{background:#dcfce7;color:#166534}.emprestada{background:#dbeafe;color:#1d4ed8}.manutencao{background:#fef3c7;color:#92400e}.quebrada{background:#fee2e2;color:#991b1b}
+.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:11px}
+.empty{text-align:center;padding:35px;color:var(--muted)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:15px;z-index:20}.modal.open{display:flex}.modal-box{background:white;border-radius:15px;width:min(520px,100%);padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.2)}.modal-box h3{margin-top:0}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-grid .full{grid-column:1/-1}.form-grid label{font-size:12px;font-weight:700;color:#526075;display:block;margin-bottom:5px}.form-grid input,.form-grid select{width:100%}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.history{margin-top:20px}.small{font-size:12px;color:var(--muted)}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}header{align-items:flex-start;flex-direction:column}.clock{text-align:left}}
+@media(max-width:520px){.cards{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:auto}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🧰 Controle de Ferramentas</h1>
+    <p>Almoxarifado • Empréstimo • Devolução • Manutenção • Histórico</p>
+  </div>
+  <div class="clock" id="clock"></div>
+</header>
+
+<main class="container">
+  <section class="cards">
+    <div class="card"><div class="n" id="total">0</div><div class="l">Total de ferramentas</div></div>
+    <div class="card"><div class="n" id="available">0</div><div class="l">Disponíveis</div></div>
+    <div class="card"><div class="n" id="loaned">0</div><div class="l">Com operador</div></div>
+    <div class="card"><div class="n" id="maint">0</div><div class="l">Em manutenção</div></div>
+    <div class="card"><div class="n" id="broken">0</div><div class="l">Quebradas</div></div>
+  </section>
+
+  <section class="toolbar">
+    <input id="search" placeholder="🔎 Pesquisar ferramenta, código ou operador...">
+    <select id="filter">
+      <option value="TODOS">Todos os status</option>
+      <option value="DISPONÍVEL">Disponível</option>
+      <option value="EM USO">Em uso</option>
+      <option value="MANUTENÇÃO">Manutenção</option>
+      <option value="QUEBRADA">Quebrada</option>
+    </select>
+    <button class="btn-primary" onclick="openToolModal()">＋ Nova ferramenta</button>
+    <button class="btn-green" onclick="exportCSV()">⬇ Exportar CSV</button>
+    <button class="btn-gray" onclick="backup()">💾 Backup</button>
+    <button class="btn-gray" onclick="document.getElementById('restoreFile').click()">↥ Restaurar</button>
+    <input id="restoreFile" type="file" accept=".json" hidden onchange="restore(event)">
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Ferramentas cadastradas</h2>
+      <span class="small">Os dados ficam salvos neste navegador.</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Código</th><th>Ferramenta</th><th>Local</th><th>Status</th><th>Operador</th><th>Data/Hora</th><th>Observação</th><th>Ações</th>
+        </tr></thead>
+        <tbody id="toolsBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel history">
+    <div class="panel-head">
+      <h2>📋 Histórico de movimentações</h2>
+      <button class="btn-gray" onclick="clearHistory()">Limpar histórico</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data/Hora</th><th>Ferramenta</th><th>Ação</th><th>Operador</th><th>Observação</th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3 id="modalTitle">Nova ferramenta</h3>
+    <div class="form-grid">
+      <div><label>Código / patrimônio</label><input id="fCode" placeholder="Ex.: F-001"></div>
+      <div><label>Nome da ferramenta</label><input id="fName" placeholder="Ex.: Furadeira"></div>
+      <div><label>Local / setor</label><input id="fLocation" placeholder="Ex.: Almoxarifado"></div>
+      <div><label>Status inicial</label><select id="fStatus">
+        <option>DISPONÍVEL</option><option>MANUTENÇÃO</option><option>QUEBRADA</option>
+      </select></div>
+      <div class="full"><label>Observação</label><input id="fObs" placeholder="Marca, modelo, condição, etc."></div>
+    </div>
+    <div class="modal-actions"><button class="btn-gray" onclick="closeModal()">Cancelar</button><button class="btn-primary" onclick="saveTool()">Salvar ferramenta</button></div>
+  </div>
+</div>
+
+<div class="modal" id="actionModal">
+  <div class="modal-box">
+    <h3 id="actionTitle">Registrar</h3>
+    <div class="form-grid">
+      <div class="full"><label>Nome do operador</label><input id="operator" placeholder="Digite o nome completo"></div>
+      <div class="full"><label>Observação / motivo</label><input id="actionObs" placeholder="Ex.: retirada para produção, equipamento com defeito..."></div>
+      <div class="full" id="statusBox"><label>Novo status</label><select id="newStatus"><option>DISPONÍVEL</option><option>EM USO</option><option>MANUTENÇÃO</option><option>QUEBRADA</option></select></div>
+    </div>
+    <div class="modal-actions"><button class="btn-gray" onclick="closeActionModal()">Cancelar</button><button class="btn-primary" onclick="confirmAction()">Confirmar</button></div>
+  </div>
+</div>
+
+<script>
+const KEY='controle_ferramentas_v1';
+const HISTORY='controle_ferramentas_historico_v1';
+let tools=JSON.parse(localStorage.getItem(KEY)||'[]');
+let history=JSON.parse(localStorage.getItem(HISTORY)||'[]');
+let editId=null, actionId=null, actionType='';
+
+function saveData(){localStorage.setItem(KEY,JSON.stringify(tools));localStorage.setItem(HISTORY,JSON.stringify(history));}
+function now(){return new Date().toLocaleString('pt-BR');}
+function clock(){document.getElementById('clock').textContent=new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'medium'});}
+setInterval(clock,1000); clock();
+
+function statusClass(s){return {'DISPONÍVEL':'disponivel','EM USO':'emprestada','MANUTENÇÃO':'manutencao','QUEBRADA':'quebrada'}[s]||''}
+function render(){
+ const q=document.getElementById('search').value.toLowerCase();
+ const f=document.getElementById('filter').value;
+ const filtered=tools.filter(t=>(f==='TODOS'||t.status===f)&&[t.code,t.name,t.location,t.operator,t.status,t.obs].join(' ').toLowerCase().includes(q));
+ document.getElementById('total').textContent=tools.length;
+ document.getElementById('available').textContent=tools.filter(t=>t.status==='DISPONÍVEL').length;
+ document.getElementById('loaned').textContent=tools.filter(t=>t.status==='EM USO').length;
+ document.getElementById('maint').textContent=tools.filter(t=>t.status==='MANUTENÇÃO').length;
+ document.getElementById('broken').textContent=tools.filter(t=>t.status==='QUEBRADA').length;
+ const body=document.getElementById('toolsBody');
+ body.innerHTML=filtered.length?filtered.map(t=>`<tr>
+ <td><b>${esc(t.code)}</b></td><td>${esc(t.name)}</td><td>${esc(t.location||'-')}</td>
+ <td><span class="badge ${statusClass(t.status)}">${esc(t.status)}</span></td>
+ <td>${esc(t.operator||'-')}</td><td>${esc(t.date||'-')}</td><td>${esc(t.obs||'-')}</td>
+ <td><div class="actions">
+ ${t.status==='DISPONÍVEL'?`<button class="btn-primary" onclick="openAction('${t.id}','RETIRADA')">Pegar</button>`:''}
+ ${t.status==='EM USO'?`<button class="btn-green" onclick="openAction('${t.id}','DEVOLUÇÃO')">Devolver</button>`:''}
+ ${t.status!=='EM USO'?`<button class="btn-orange" onclick="openAction('${t.id}','STATUS')">Status</button>`:''}
+ <button class="btn-gray" onclick="editTool('${t.id}')">Editar</button>
+ <button class="btn-red" onclick="deleteTool('${t.id}')">Excluir</button>
+ </div></td></tr>`).join(''):`<tr><td colspan="8" class="empty">Nenhuma ferramenta encontrada.</td></tr>`;
+ document.getElementById('historyBody').innerHTML=history.length?history.slice().reverse().map(h=>`<tr><td>${esc(h.date)}</td><td>${esc(h.tool)}</td><td><b>${esc(h.action)}</b></td><td>${esc(h.operator||'-')}</td><td>${esc(h.obs||'-')}</td></tr>`).join(''):`<tr><td colspan="5" class="empty">Nenhuma movimentação registrada.</td></tr>`;
+}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+
+document.getElementById('search').addEventListener('input',render);
+document.getElementById('filter').addEventListener('change',render);
+
+function openToolModal(id=null){
+ editId=id;
+ document.getElementById('modalTitle').textContent=id?'Editar ferramenta':'Nova ferramenta';
+ const t=tools.find(x=>x.id===id);
+ document.getElementById('fCode').value=t?.code||'';
+ document.getElementById('fName').value=t?.name||'';
+ document.getElementById('fLocation').value=t?.location||'Almoxarifado';
+ document.getElementById('fStatus').value=t?.status||'DISPONÍVEL';
+ document.getElementById('fObs').value=t?.obs||'';
+ document.getElementById('modal').classList.add('open');
+}
+function closeModal(){document.getElementById('modal').classList.remove('open')}
+function saveTool(){
+ const code=fCode.value.trim(),name=fName.value.trim();
+ if(!code||!name){alert('Informe o código e o nome da ferramenta.');return}
+ if(editId){
+   const t=tools.find(x=>x.id===editId); Object.assign(t,{code,name,location:fLocation.value.trim(),status:fStatus.value,obs:fObs.value.trim()});
+   addHistory(t,'EDIÇÃO','', 'Cadastro da ferramenta alterado.');
+ }else{
+   const t={id:crypto.randomUUID(),code,name,location:fLocation.value.trim(),status:fStatus.value,operator:'',date:'',obs:fObs.value.trim()};
+   tools.push(t); addHistory(t,'CADASTRO','', 'Ferramenta cadastrada.');
+ }
+ saveData();closeModal();render();
+}
+function editTool(id){openToolModal(id)}
+function deleteTool(id){
+ const t=tools.find(x=>x.id===id);
+ if(confirm(`Excluir a ferramenta "${t.name}"?`)){tools=tools.filter(x=>x.id!==id);addHistory(t,'EXCLUSÃO','', 'Ferramenta excluída do cadastro.');saveData();render();}
+}
+function openAction(id,type){
+ actionId=id;actionType=type;
+ const t=tools.find(x=>x.id===id);
+ document.getElementById('actionTitle').textContent=type==='RETIRADA'?'📤 Registrar retirada':type==='DEVOLUÇÃO'?'📥 Registrar devolução':'🔧 Alterar status';
+ document.getElementById('operator').value=type==='DEVOLUÇÃO'?(t.operator||''):'';
+ document.getElementById('actionObs').value='';
+ document.getElementById('statusBox').style.display=type==='STATUS'?'block':'none';
+ if(type==='STATUS')document.getElementById('newStatus').value=t.status==='MANUTENÇÃO'?'QUEBRADA':'MANUTENÇÃO';
+ document.getElementById('actionModal').classList.add('open');
+}
+function closeActionModal(){document.getElementById('actionModal').classList.remove('open')}
+function confirmAction(){
+ const t=tools.find(x=>x.id===actionId); if(!t)return;
+ const op=document.getElementById('operator').value.trim(),obs=document.getElementById('actionObs').value.trim();
+ if(actionType==='RETIRADA'&&!op){alert('Informe o nome do operador.');return}
+ if(actionType==='RETIRADA'){t.status='EM USO';t.operator=op;t.date=now();t.obs=obs||'Retirada pelo operador.'}
+ if(actionType==='DEVOLUÇÃO'){t.status='DISPONÍVEL';t.operator='';t.date=now();t.obs=obs||'Ferramenta devolvida ao almoxarifado.'}
+ if(actionType==='STATUS'){t.status=document.getElementById('newStatus').value;t.date=now();t.obs=obs||'Status alterado.';if(t.status!=='EM USO')t.operator=''}
+ addHistory(t,actionType,op||t.operator,obs||t.obs);saveData();closeActionModal();render();
+}
+function addHistory(t,action,operator,obs){history.push({date:now(),tool:`${t.code} - ${t.name}`,action,operator,obs});if(history.length>1000)history=history.slice(-1000)}
+function clearHistory(){if(confirm('Limpar todo o histórico?')){history=[];saveData();render()}}
+function exportCSV(){
+ let rows=[['Código','Ferramenta','Local','Status','Operador','Data/Hora','Observação']];
+ tools.forEach(t=>rows.push([t.code,t.name,t.location,t.status,t.operator,t.date,t.obs]));
+ let csv='﻿'+rows.map(r=>r.map(x=>`"${String(x??'').replace(/"/g,'""')}"`).join(';')).join('\\n');
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='controle-ferramentas.csv';a.click();
+}
+function backup(){
+ const data=JSON.stringify({tools,history},null,2);
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));a.download='backup-controle-ferramentas.json';a.click();
+}
+function restore(e){
+ const file=e.target.files[0];if(!file)return;
+ const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.tools))throw Error();tools=d.tools;history=Array.isArray(d.history)?d.history:[];saveData();render();alert('Backup restaurado com sucesso.')}catch{alert('Arquivo de backup inválido.')}};r.readAsText(file);e.target.value='';
+}
+render();
+</script>
+</body>
+</html>
