@@ -114,7 +114,11 @@ th{background:#f9fafb}
       </div>
       <button class="primary" type="submit">ENTRAR</button>
     </form>
-    <div class="demo">Versão inicial • acesso demonstrativo</div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button type="button" id="showSignupBtn" class="btn btn-light" style="flex:1">Criar conta</button>
+      <button type="button" id="forgotBtn" class="btn btn-light" style="flex:1">Esqueci a senha</button>
+    </div>
+    <div id="authMessage" class="demo">Conecte seu projeto Supabase para usar o sistema online.</div>
   </div>
 </section>
 
@@ -363,236 +367,146 @@ th{background:#f9fafb}
 
 <div id="toast" class="toast hidden"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const STORAGE_MEMBERS = "igreja_membros_v1";
-const STORAGE_WORKERS = "igreja_obreiros_v1";
-const STORAGE_DOCUMENTS = "igreja_documentos_v1";
-const STORAGE_FINANCE = "igreja_financeiro_v1";
-const DEMO_EMAIL = "admin@igreja.com";
-const DEMO_PASSWORD = "123456";
+/* ==========================================================
+   CONFIGURAÇÃO SUPABASE
+   1) Crie um projeto em supabase.com
+   2) Vá em Project Settings > API
+   3) Cole abaixo o Project URL e a Publishable key.
+   NUNCA coloque a service_role key neste arquivo.
+========================================================== */
+const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SEU_PROJETO";
+const SUPABASE_KEY = "COLE_AQUI_A_PUBLISHABLE_KEY";
+const SUPABASE_CONFIGURED = !SUPABASE_URL.includes("COLE_AQUI") && !SUPABASE_KEY.includes("COLE_AQUI");
+const sb = SUPABASE_CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}
+}) : null;
 
-let members = JSON.parse(localStorage.getItem(STORAGE_MEMBERS) || "[]");
-let workers = JSON.parse(localStorage.getItem(STORAGE_WORKERS) || "[]");
-let documents = JSON.parse(localStorage.getItem(STORAGE_DOCUMENTS) || "[]");
-let finance = JSON.parse(localStorage.getItem(STORAGE_FINANCE) || "[]");
+let members=[], workers=[], documents=[], finance=[];
+let currentUser=null;
 
-function saveData(){
-  localStorage.setItem(STORAGE_MEMBERS, JSON.stringify(members));
-  localStorage.setItem(STORAGE_WORKERS, JSON.stringify(workers));
-  localStorage.setItem(STORAGE_DOCUMENTS, JSON.stringify(documents));
-  localStorage.setItem(STORAGE_FINANCE, JSON.stringify(finance));
-  updateDashboard();
-  renderDocuments();
-  renderFinance();
+function $(id){return document.getElementById(id)}
+function getVal(id){return $(id)?.value?.trim()||""}
+function setVal(id,v){if($(id))$(id).value=v||""}
+function escapeHtml(v=""){return String(v).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function showToast(msg){const t=$("toast");t.textContent=msg;t.classList.remove("hidden");setTimeout(()=>t.classList.add("hidden"),2800)}
+function setAuthMessage(msg,error=false){const el=$("authMessage");if(el){el.textContent=msg;el.style.color=error?"#b91c1c":"#6b7280"}}
+function brl(v){return Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}
+function today(){return new Date().toISOString().slice(0,10)}
+function dbError(error){console.error(error);showToast(error?.message||"Erro ao acessar o banco de dados.")}
+
+async function signIn(){
+ if(!sb){setAuthMessage("Configure as chaves do Supabase no index.html primeiro.",true);return}
+ const email=$("loginEmail").value.trim(), password=$("loginPassword").value;
+ if(!email||!password)return;
+ const {data,error}=await sb.auth.signInWithPassword({email,password});
+ if(error){setAuthMessage(error.message,true);return}
+ currentUser=data.user; await enterApp();
 }
 
-function showToast(msg){
-  const t=document.getElementById("toast"); t.textContent=msg; t.classList.remove("hidden");
-  setTimeout(()=>t.classList.add("hidden"),2500);
+async function signUp(){
+ if(!sb){setAuthMessage("Configure as chaves do Supabase no index.html primeiro.",true);return}
+ const email=$("loginEmail").value.trim(), password=$("loginPassword").value;
+ if(!email||password.length<6){setAuthMessage("Informe um e-mail e uma senha com pelo menos 6 caracteres.",true);return}
+ const {data,error}=await sb.auth.signUp({email,password});
+ if(error){setAuthMessage(error.message,true);return}
+ if(data.session){currentUser=data.user;await enterApp();}
+ else setAuthMessage("Conta criada. Verifique seu e-mail para confirmar o cadastro.");
 }
 
-function escapeHtml(v=""){
- return String(v).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
+async function resetPassword(){
+ if(!sb){setAuthMessage("Configure as chaves do Supabase no index.html primeiro.",true);return}
+ const email=$("loginEmail").value.trim();
+ if(!email){setAuthMessage("Digite seu e-mail antes de pedir a recuperação da senha.",true);return}
+ const redirect=window.location.origin+window.location.pathname;
+ const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:redirect});
+ if(error){setAuthMessage(error.message,true);return}
+ setAuthMessage("Enviamos as instruções de recuperação para seu e-mail.");
 }
 
-function login(){
- document.getElementById("loginScreen").classList.add("hidden");
- document.getElementById("app").classList.remove("hidden");
- document.getElementById("loggedUser").textContent=localStorage.getItem("igreja_user") || DEMO_EMAIL;
- updateDashboard();
- renderMembers();
- renderWorkers();
- renderDocuments();
- renderFinance();
+async function logout(){if(sb)await sb.auth.signOut();currentUser=null;location.reload()}
+
+async function enterApp(){
+ $("loginScreen").classList.add("hidden");$("app").classList.remove("hidden");
+ $("loggedUser").textContent=currentUser?.email||"Usuário";
+ await loadAll();
 }
 
-document.getElementById("loginForm").addEventListener("submit",e=>{
- e.preventDefault();
- const email=document.getElementById("loginEmail").value.trim();
- const pass=document.getElementById("loginPassword").value;
- if(email===DEMO_EMAIL && pass===DEMO_PASSWORD){
-   localStorage.setItem("igreja_user",email); login();
- }else showToast("E-mail ou senha incorretos.");
-});
-
-document.getElementById("logoutBtn").addEventListener("click",()=>{
- localStorage.removeItem("igreja_user"); location.reload();
-});
-
-document.querySelectorAll(".nav button[data-page]").forEach(btn=>{
- btn.addEventListener("click",()=>{
-  document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
-  btn.classList.add("active");
-  const page=btn.dataset.page;
-  document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));
-  document.getElementById(page+"Page").classList.remove("hidden");
-  const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro"};
-  document.getElementById("pageTitle").textContent=titles[page]||"Painel";
-  if(page==="secretaria"||page==="documentos") renderDocuments();
-  if(page==="tesouraria"||page==="financeiro") renderFinance();
- });
-});
+async function loadAll(){
+ try{
+  const [m,w,d,f]=await Promise.all([
+   sb.from("members").select("*").order("created_at",{ascending:false}),
+   sb.from("workers").select("*").order("created_at",{ascending:false}),
+   sb.from("documents").select("*").order("created_at",{ascending:false}),
+   sb.from("finance_entries").select("*").order("date",{ascending:false}).order("created_at",{ascending:false})
+  ]);
+  if(m.error)throw m.error;if(w.error)throw w.error;if(d.error)throw d.error;if(f.error)throw f.error;
+  members=m.data||[];workers=w.data||[];documents=d.data||[];finance=f.data||[];
+  renderMembers();renderWorkers();renderDocuments();renderFinance();updateDashboard();
+ }catch(e){dbError(e)}
+}
 
 function updateDashboard(){
  const ativos=members.filter(x=>x.situacao==="Ativo").length;
- document.getElementById("totalMembros").textContent=members.length;
- document.getElementById("totalObreiros").textContent=workers.length;
- document.getElementById("ativos").textContent=ativos;
- document.getElementById("totalCadastros").textContent=members.length+workers.length;
-
- const all=[...members.map(x=>({...x,tipo:"Membro"})),...workers.map(x=>({...x,tipo:"Obreiro"}))]
-   .sort((a,b)=>b.createdAt-a.createdAt).slice(0,8);
- const box=document.getElementById("recentList");
- if(!all.length){box.innerHTML='<div class="empty">Nenhum cadastro realizado ainda.</div>';return;}
- box.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Tipo</th><th>Contato</th><th>Situação</th></tr></thead><tbody>${
- all.map(x=>`<tr><td>${escapeHtml(x.nome)}</td><td>${x.tipo}</td><td>${escapeHtml(x.telefone||"-")}</td><td><span class="badge ${x.situacao==="Ativo"?"active":"inactive"}">${escapeHtml(x.situacao||"-")}</span></td></tr>`).join("")
- }</tbody></table></div>`;
+ $("totalMembros").textContent=members.length;$("totalObreiros").textContent=workers.length;$("ativos").textContent=ativos;$("totalCadastros").textContent=members.length+workers.length;
+ const all=[...members.map(x=>({...x,tipo:"Membro"})),...workers.map(x=>({...x,tipo:"Obreiro"}))].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,8);
+ const box=$("recentList");if(!all.length){box.innerHTML='<div class="empty">Nenhum cadastro realizado ainda.</div>';return}
+ box.innerHTML=`<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Tipo</th><th>Contato</th><th>Situação</th></tr></thead><tbody>${all.map(x=>`<tr><td>${escapeHtml(x.nome)}</td><td>${x.tipo}</td><td>${escapeHtml(x.telefone||"-")}</td><td><span class="badge ${x.situacao==="Ativo"?"active":"inactive"}">${escapeHtml(x.situacao||"-")}</span></td></tr>`).join("")}</tbody></table></div>`;
 }
 
-function openMemberModal(id=null){
- document.getElementById("memberForm").reset();
- document.getElementById("memberId").value=id||"";
- document.getElementById("memberModalTitle").textContent=id?"Editar membro":"Novo membro";
- if(id){
-  const x=members.find(a=>a.id===id); if(!x)return;
-  setVal("mNome",x.nome);setVal("mCpf",x.cpf);setVal("mNascimento",x.nascimento);setVal("mTelefone",x.telefone);setVal("mEmail",x.email);setVal("mEndereco",x.endereco);setVal("mBairro",x.bairro);setVal("mConversao",x.conversao);setVal("mBatismo",x.batismo);setVal("mEstado",x.estado);setVal("mDepartamento",x.departamento);setVal("mSituacao",x.situacao);setVal("mObs",x.obs);
- }
- document.getElementById("memberModal").classList.remove("hidden");
+async function saveMember(e){
+ e.preventDefault();const id=getVal("memberId");
+ const row={nome:getVal("mNome"),cpf:getVal("mCpf"),nascimento:getVal("mNascimento")||null,telefone:getVal("mTelefone"),email:getVal("mEmail"),endereco:getVal("mEndereco"),bairro:getVal("mBairro"),conversao:getVal("mConversao")||null,batismo:getVal("mBatismo")||null,estado:getVal("mEstado"),departamento:getVal("mDepartamento"),situacao:getVal("mSituacao"),obs:getVal("mObs")};
+ try{let r=id?await sb.from("members").update(row).eq("id",id):await sb.from("members").insert(row);if(r.error)throw r.error;closeModal("memberModal");showToast(id?"Membro atualizado!":"Membro cadastrado!");await loadAll()}catch(e){dbError(e)}
 }
-document.getElementById("memberForm").addEventListener("submit",e=>{
- e.preventDefault();
- const id=document.getElementById("memberId").value;
- const obj={id:id||crypto.randomUUID(),nome:getVal("mNome"),cpf:getVal("mCpf"),nascimento:getVal("mNascimento"),telefone:getVal("mTelefone"),email:getVal("mEmail"),endereco:getVal("mEndereco"),bairro:getVal("mBairro"),conversao:getVal("mConversao"),batismo:getVal("mBatismo"),estado:getVal("mEstado"),departamento:getVal("mDepartamento"),situacao:getVal("mSituacao"),obs:getVal("mObs"),createdAt:id?(members.find(x=>x.id===id)?.createdAt||Date.now()):Date.now()};
- if(id) members=members.map(x=>x.id===id?obj:x); else members.push(obj);
- saveData();renderMembers();closeModal("memberModal");showToast(id?"Membro atualizado!":"Membro cadastrado!");
-});
+function openMemberModal(id=null){$("memberForm").reset();$("memberId").value=id||"";$("memberModalTitle").textContent=id?"Editar membro":"Novo membro";if(id){const x=members.find(a=>a.id===id);if(!x)return;setVal("mNome",x.nome);setVal("mCpf",x.cpf);setVal("mNascimento",x.nascimento);setVal("mTelefone",x.telefone);setVal("mEmail",x.email);setVal("mEndereco",x.endereco);setVal("mBairro",x.bairro);setVal("mConversao",x.conversao);setVal("mBatismo",x.batismo);setVal("mEstado",x.estado);setVal("mDepartamento",x.departamento);setVal("mSituacao",x.situacao);setVal("mObs",x.obs)}$("memberModal").classList.remove("hidden")}
+function renderMembers(){const q=($("memberSearch")?.value||"").toLowerCase();const arr=members.filter(x=>`${x.nome} ${x.telefone||""} ${x.email||""}`.toLowerCase().includes(q));$("membersTable").innerHTML=arr.length?arr.map(x=>`<tr><td><strong>${escapeHtml(x.nome)}</strong></td><td>${escapeHtml(x.telefone||"-")}</td><td>${escapeHtml(x.departamento||"-")}</td><td><span class="badge ${x.situacao==="Ativo"?"active":"inactive"}">${escapeHtml(x.situacao||"-")}</span></td><td><div class="actions"><button onclick="openMemberModal('${x.id}')" class="btn-light">Editar</button><button onclick="deleteMember('${x.id}')" class="btn-red">Excluir</button></div></td></tr>`).join(""):`<tr><td colspan="5" class="empty">Nenhum membro encontrado.</td></tr>`}
+async function deleteMember(id){const x=members.find(a=>a.id===id);if(!x||!confirm(`Excluir o cadastro de ${x.nome}?`))return;try{const r=await sb.from("members").delete().eq("id",id);if(r.error)throw r.error;showToast("Cadastro excluído.");await loadAll()}catch(e){dbError(e)}}
 
-function renderMembers(){
- const q=(document.getElementById("memberSearch")?.value||"").toLowerCase();
- const arr=members.filter(x=>`${x.nome} ${x.telefone} ${x.email}`.toLowerCase().includes(q));
- const body=document.getElementById("membersTable");
- body.innerHTML=arr.length?arr.map(x=>`<tr><td><strong>${escapeHtml(x.nome)}</strong></td><td>${escapeHtml(x.telefone||"-")}</td><td>${escapeHtml(x.departamento||"-")}</td><td><span class="badge ${x.situacao==="Ativo"?"active":"inactive"}">${escapeHtml(x.situacao)}</span></td><td><div class="actions"><button onclick="openMemberModal('${x.id}')" class="btn-light">Editar</button><button onclick="deleteMember('${x.id}')" class="btn-red">Excluir</button></div></td></tr>`).join(""):`<tr><td colspan="5" class="empty">Nenhum membro encontrado.</td></tr>`;
+async function saveWorker(e){
+ e.preventDefault();const id=getVal("workerId");
+ const row={nome:getVal("wNome"),cpf:getVal("wCpf"),nascimento:getVal("wNascimento")||null,telefone:getVal("wTelefone"),email:getVal("wEmail"),cargo:getVal("wCargo"),consagracao:getVal("wConsagracao")||null,departamento:getVal("wDepartamento"),congregacao:getVal("wCongregacao"),situacao:getVal("wSituacao"),obs:getVal("wObs")};
+ try{let r=id?await sb.from("workers").update(row).eq("id",id):await sb.from("workers").insert(row);if(r.error)throw r.error;closeModal("workerModal");showToast(id?"Obreiro atualizado!":"Obreiro cadastrado!");await loadAll()}catch(e){dbError(e)}
 }
-function deleteMember(id){
- const x=members.find(a=>a.id===id);
- if(x && confirm(`Excluir o cadastro de ${x.nome}?`)){members=members.filter(a=>a.id!==id);saveData();renderMembers();showToast("Cadastro excluído.");}
-}
+function openWorkerModal(id=null){$("workerForm").reset();$("workerId").value=id||"";$("workerModalTitle").textContent=id?"Editar obreiro":"Novo obreiro";if(id){const x=workers.find(a=>a.id===id);if(!x)return;setVal("wNome",x.nome);setVal("wCpf",x.cpf);setVal("wNascimento",x.nascimento);setVal("wTelefone",x.telefone);setVal("wEmail",x.email);setVal("wCargo",x.cargo);setVal("wConsagracao",x.consagracao);setVal("wDepartamento",x.departamento);setVal("wCongregacao",x.congregacao);setVal("wSituacao",x.situacao);setVal("wObs",x.obs)}$("workerModal").classList.remove("hidden")}
+function renderWorkers(){const q=($("workerSearch")?.value||"").toLowerCase();const arr=workers.filter(x=>`${x.nome} ${x.cargo||""} ${x.telefone||""}`.toLowerCase().includes(q));$("workersTable").innerHTML=arr.length?arr.map(x=>`<tr><td><strong>${escapeHtml(x.nome)}</strong></td><td><span class="badge obreiro">${escapeHtml(x.cargo||"-")}</span></td><td>${escapeHtml(x.telefone||"-")}</td><td>${escapeHtml(x.departamento||"-")}</td><td><div class="actions"><button onclick="openWorkerModal('${x.id}')" class="btn-light">Editar</button><button onclick="deleteWorker('${x.id}')" class="btn-red">Excluir</button></div></td></tr>`).join(""):`<tr><td colspan="5" class="empty">Nenhum obreiro encontrado.</td></tr>`}
+async function deleteWorker(id){const x=workers.find(a=>a.id===id);if(!x||!confirm(`Excluir o cadastro de ${x.nome}?`))return;try{const r=await sb.from("workers").delete().eq("id",id);if(r.error)throw r.error;showToast("Cadastro excluído.");await loadAll()}catch(e){dbError(e)}}
 
-function openWorkerModal(id=null){
- document.getElementById("workerForm").reset();
- document.getElementById("workerId").value=id||"";
- document.getElementById("workerModalTitle").textContent=id?"Editar obreiro":"Novo obreiro";
- if(id){
-  const x=workers.find(a=>a.id===id); if(!x)return;
-  setVal("wNome",x.nome);setVal("wCpf",x.cpf);setVal("wNascimento",x.nascimento);setVal("wTelefone",x.telefone);setVal("wEmail",x.email);setVal("wCargo",x.cargo);setVal("wConsagracao",x.consagracao);setVal("wDepartamento",x.departamento);setVal("wCongregacao",x.congregacao);setVal("wSituacao",x.situacao);setVal("wObs",x.obs);
- }
- document.getElementById("workerModal").classList.remove("hidden");
-}
-document.getElementById("workerForm").addEventListener("submit",e=>{
- e.preventDefault();
- const id=document.getElementById("workerId").value;
- const obj={id:id||crypto.randomUUID(),nome:getVal("wNome"),cpf:getVal("wCpf"),nascimento:getVal("wNascimento"),telefone:getVal("wTelefone"),email:getVal("wEmail"),cargo:getVal("wCargo"),consagracao:getVal("wConsagracao"),departamento:getVal("wDepartamento"),congregacao:getVal("wCongregacao"),situacao:getVal("wSituacao"),obs:getVal("wObs"),createdAt:id?(workers.find(x=>x.id===id)?.createdAt||Date.now()):Date.now()};
- if(id) workers=workers.map(x=>x.id===id?obj:x); else workers.push(obj);
- saveData();renderWorkers();closeModal("workerModal");showToast(id?"Obreiro atualizado!":"Obreiro cadastrado!");
-});
+async function saveDocument(e){e.preventDefault();const id=getVal("documentId");const row={tipo:getVal("dTipo"),pessoa:getVal("dPessoa"),data:getVal("dData")||null,status:getVal("dStatus"),obs:getVal("dObs")};try{let r=id?await sb.from("documents").update(row).eq("id",id):await sb.from("documents").insert(row);if(r.error)throw r.error;closeModal("documentModal");showToast(id?"Documento atualizado!":"Documento registrado!");await loadAll()}catch(e){dbError(e)}}
+function openDocumentModal(tipo=""){ $("documentForm").reset();$("documentId").value="";$("documentModalTitle").textContent="Novo documento";if(tipo)$("dTipo").value=tipo;$("dData").value=today();$("documentModal").classList.remove("hidden") }
+function editDocument(id){const x=documents.find(a=>a.id===id);if(!x)return;$("documentId").value=id;$("documentModalTitle").textContent="Editar documento";setVal("dTipo",x.tipo);setVal("dPessoa",x.pessoa);setVal("dData",x.data);setVal("dStatus",x.status);setVal("dObs",x.obs);$("documentModal").classList.remove("hidden")}
+function renderDocuments(){const q=($("docSearch")?.value||"").toLowerCase();const arr=documents.filter(x=>`${x.tipo} ${x.pessoa} ${x.status}`.toLowerCase().includes(q));const body=$("documentsTable");if(!body)return;body.innerHTML=arr.length?arr.map(x=>`<tr><td><strong>${escapeHtml(x.tipo)}</strong></td><td>${escapeHtml(x.pessoa)}</td><td>${escapeHtml(x.tipo)}</td><td>${escapeHtml(x.data||"-")}</td><td><span class="badge ${x.status==="Cancelado"?"inactive":"active"}">${escapeHtml(x.status)}</span></td><td><div class="actions"><button class="btn-light" onclick="editDocument('${x.id}')">Editar</button><button class="btn-red" onclick="deleteDocument('${x.id}')">Excluir</button></div></td></tr>`).join(""):`<tr><td colspan="6" class="empty">Nenhum documento registrado.</td></tr>`}
+async function deleteDocument(id){const x=documents.find(a=>a.id===id);if(!x||!confirm(`Excluir o documento de ${x.pessoa}?`))return;try{const r=await sb.from("documents").delete().eq("id",id);if(r.error)throw r.error;showToast("Documento excluído.");await loadAll()}catch(e){dbError(e)}}
 
-function renderWorkers(){
- const q=(document.getElementById("workerSearch")?.value||"").toLowerCase();
- const arr=workers.filter(x=>`${x.nome} ${x.cargo} ${x.telefone}`.toLowerCase().includes(q));
- const body=document.getElementById("workersTable");
- body.innerHTML=arr.length?arr.map(x=>`<tr><td><strong>${escapeHtml(x.nome)}</strong></td><td><span class="badge obreiro">${escapeHtml(x.cargo||"-")}</span></td><td>${escapeHtml(x.telefone||"-")}</td><td>${escapeHtml(x.departamento||"-")}</td><td><div class="actions"><button onclick="openWorkerModal('${x.id}')" class="btn-light">Editar</button><button onclick="deleteWorker('${x.id}')" class="btn-red">Excluir</button></div></td></tr>`).join(""):`<tr><td colspan="5" class="empty">Nenhum obreiro encontrado.</td></tr>`;
-}
-function deleteWorker(id){
- const x=workers.find(a=>a.id===id);
- if(x && confirm(`Excluir o cadastro de ${x.nome}?`)){workers=workers.filter(a=>a.id!==id);saveData();renderWorkers();showToast("Cadastro excluído.");}
-}
+async function saveFinance(e){e.preventDefault();const id=getVal("financeId");const row={tipo:getVal("fTipo"),categoria:getVal("fCategoria"),date:getVal("fData")||today(),valor:Number($("fValor").value||0),descricao:getVal("fDescricao"),obs:getVal("fObs")};try{let r=id?await sb.from("finance_entries").update(row).eq("id",id):await sb.from("finance_entries").insert(row);if(r.error)throw r.error;closeModal("financeModal");showToast(id?"Lançamento atualizado!":"Lançamento salvo!");await loadAll()}catch(e){dbError(e)}}
+function openFinanceModal(){$("financeForm").reset();$("financeId").value="";$("fData").value=today();$("financeModalTitle").textContent="Novo lançamento financeiro";$("financeModal").classList.remove("hidden")}
+function editFinance(id){const x=finance.find(a=>a.id===id);if(!x)return;$("financeId").value=id;$("financeModalTitle").textContent="Editar lançamento";setVal("fTipo",x.tipo);setVal("fCategoria",x.categoria);setVal("fData",x.date);$("fValor").value=x.valor;setVal("fDescricao",x.descricao);setVal("fObs",x.obs);$("financeModal").classList.remove("hidden")}
+function renderFinance(){const q=($("financeSearch")?.value||"").toLowerCase();const arr=finance.filter(x=>`${x.tipo} ${x.categoria} ${x.descricao||""}`.toLowerCase().includes(q));let diz=0,of=0,entr=0,des=0;finance.forEach(x=>{if(x.tipo==="Entrada"){entr+=Number(x.valor);if(x.categoria==="Dízimos")diz+=Number(x.valor);if(x.categoria==="Ofertas")of+=Number(x.valor)}else des+=Number(x.valor)});const set=(id,v)=>{if($(id))$(id).textContent=v};set("sumDizimos",brl(diz));set("sumOfertas",brl(of));set("sumEntradas",brl(entr-diz-of));set("sumDespesas",brl(des));set("totalEntradas",brl(entr));set("totalDespesas",brl(des));set("saldoFinanceiro",brl(entr-des));set("totalLancamentos",finance.length);const body=$("financeTable");if(!body)return;body.innerHTML=arr.length?arr.map(x=>`<tr><td>${escapeHtml(x.date||"-")}</td><td><span class="badge ${x.tipo==="Entrada"?"active":"inactive"}">${escapeHtml(x.tipo)}</span></td><td>${escapeHtml(x.categoria)}</td><td>${escapeHtml(x.descricao||"-")}</td><td><strong>${brl(x.valor)}</strong></td><td><div class="actions"><button class="btn-light" onclick="editFinance('${x.id}')">Editar</button><button class="btn-red" onclick="deleteFinance('${x.id}')">Excluir</button></div></td></tr>`).join(""):`<tr><td colspan="6" class="empty">Nenhum lançamento financeiro.</td></tr>`}
+async function deleteFinance(id){if(!confirm("Excluir este lançamento financeiro?"))return;try{const r=await sb.from("finance_entries").delete().eq("id",id);if(r.error)throw r.error;showToast("Lançamento excluído.");await loadAll()}catch(e){dbError(e)}}
 
+function closeModal(id){$(id)?.classList.add("hidden")}
 
-function openDocumentModal(tipo=""){
- document.getElementById("documentForm").reset();
- document.getElementById("documentId").value="";
- document.getElementById("documentModalTitle").textContent="Novo documento";
- if(tipo) document.getElementById("dTipo").value=tipo;
- document.getElementById("dData").value=new Date().toISOString().slice(0,10);
- document.getElementById("documentModal").classList.remove("hidden");
-}
-document.getElementById("documentForm").addEventListener("submit",e=>{
- e.preventDefault();
- const id=document.getElementById("documentId").value;
- const obj={id:id||crypto.randomUUID(),tipo:getVal("dTipo"),pessoa:getVal("dPessoa"),data:getVal("dData"),status:getVal("dStatus"),obs:getVal("dObs"),createdAt:Date.now()};
- if(id) documents=documents.map(x=>x.id===id?{...x,...obj}:x); else documents.push(obj);
- saveData();renderDocuments();closeModal("documentModal");showToast(id?"Documento atualizado!":"Documento registrado!");
-});
-function renderDocuments(){
- const q=(document.getElementById("docSearch")?.value||"").toLowerCase();
- const arr=documents.filter(x=>`${x.tipo} ${x.pessoa} ${x.status}`.toLowerCase().includes(q));
- const body=document.getElementById("documentsTable"); if(!body)return;
- body.innerHTML=arr.length?arr.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(x=>`<tr>
- <td><strong>${escapeHtml(x.tipo)}</strong></td><td>${escapeHtml(x.pessoa)}</td><td>${escapeHtml(x.tipo)}</td>
- <td>${escapeHtml(x.data||"-")}</td><td><span class="badge ${x.status==="Cancelado"?"inactive":"active"}">${escapeHtml(x.status)}</span></td>
- <td><div class="actions"><button class="btn-light" onclick="editDocument('${x.id}')">Editar</button><button class="btn-red" onclick="deleteDocument('${x.id}')">Excluir</button></div></td>
- </tr>`).join(""):`<tr><td colspan="6" class="empty">Nenhum documento registrado.</td></tr>`;
-}
-function editDocument(id){
- const x=documents.find(a=>a.id===id);if(!x)return;
- document.getElementById("documentId").value=id;document.getElementById("documentModalTitle").textContent="Editar documento";
- setVal("dTipo",x.tipo);setVal("dPessoa",x.pessoa);setVal("dData",x.data);setVal("dStatus",x.status);setVal("dObs",x.obs);
- document.getElementById("documentModal").classList.remove("hidden");
-}
-function deleteDocument(id){
- const x=documents.find(a=>a.id===id);
- if(x&&confirm(`Excluir o documento de ${x.pessoa}?`)){documents=documents.filter(a=>a.id!==id);saveData();renderDocuments();showToast("Documento excluído.");}
-}
+document.getElementById("loginForm").addEventListener("submit",e=>{e.preventDefault();signIn()});
+document.getElementById("showSignupBtn").addEventListener("click",signUp);
+document.getElementById("forgotBtn").addEventListener("click",resetPassword);
+document.getElementById("logoutBtn").addEventListener("click",logout);
+document.getElementById("memberForm").addEventListener("submit",saveMember);
+document.getElementById("workerForm").addEventListener("submit",saveWorker);
+document.getElementById("documentForm").addEventListener("submit",saveDocument);
+document.getElementById("financeForm").addEventListener("submit",saveFinance);
 
-function brl(v){return Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});}
-function openFinanceModal(){
- document.getElementById("financeForm").reset();document.getElementById("financeId").value="";
- document.getElementById("fData").value=new Date().toISOString().slice(0,10);
- document.getElementById("financeModalTitle").textContent="Novo lançamento financeiro";
- document.getElementById("financeModal").classList.remove("hidden");
-}
-document.getElementById("financeForm").addEventListener("submit",e=>{
- e.preventDefault();
- const id=document.getElementById("financeId").value;
- const obj={id:id||crypto.randomUUID(),tipo:getVal("fTipo"),categoria:getVal("fCategoria"),data:getVal("fData"),valor:Number(document.getElementById("fValor").value||0),descricao:getVal("fDescricao"),obs:getVal("fObs"),createdAt:Date.now()};
- if(id) finance=finance.map(x=>x.id===id?{...x,...obj}:x); else finance.push(obj);
- saveData();renderFinance();closeModal("financeModal");showToast(id?"Lançamento atualizado!":"Lançamento salvo!");
-});
-function renderFinance(){
- const q=(document.getElementById("financeSearch")?.value||"").toLowerCase();
- const arr=finance.filter(x=>`${x.tipo} ${x.categoria} ${x.descricao}`.toLowerCase().includes(q));
- let diz=0,of=0,entr=0,des=0;
- finance.forEach(x=>{
-   if(x.tipo==="Entrada"){entr+=x.valor;if(x.categoria==="Dízimos")diz+=x.valor;if(x.categoria==="Ofertas")of+=x.valor;}
-   else des+=x.valor;
- });
- const set=(id,val)=>{const el=document.getElementById(id);if(el)el.textContent=val;};
- set("sumDizimos",brl(diz));set("sumOfertas",brl(of));set("sumEntradas",brl(entr-diz-of));set("sumDespesas",brl(des));
- set("totalEntradas",brl(entr));set("totalDespesas",brl(des));set("saldoFinanceiro",brl(entr-des));set("totalLancamentos",finance.length);
- const body=document.getElementById("financeTable");if(!body)return;
- body.innerHTML=arr.length?arr.sort((a,b)=>(b.data||"").localeCompare(a.data||"")).map(x=>`<tr>
- <td>${escapeHtml(x.data||"-")}</td><td><span class="badge ${x.tipo==="Entrada"?"active":"inactive"}">${escapeHtml(x.tipo)}</span></td>
- <td>${escapeHtml(x.categoria)}</td><td>${escapeHtml(x.descricao||"-")}</td><td><strong>${brl(x.valor)}</strong></td>
- <td><div class="actions"><button class="btn-light" onclick="editFinance('${x.id}')">Editar</button><button class="btn-red" onclick="deleteFinance('${x.id}')">Excluir</button></div></td>
- </tr>`).join(""):`<tr><td colspan="6" class="empty">Nenhum lançamento financeiro.</td></tr>`;
-}
-function editFinance(id){
- const x=finance.find(a=>a.id===id);if(!x)return;
- document.getElementById("financeId").value=id;document.getElementById("financeModalTitle").textContent="Editar lançamento";
- setVal("fTipo",x.tipo);setVal("fCategoria",x.categoria);setVal("fData",x.data);document.getElementById("fValor").value=x.valor;setVal("fDescricao",x.descricao);setVal("fObs",x.obs);
- document.getElementById("financeModal").classList.remove("hidden");
-}
-function deleteFinance(id){
- if(confirm("Excluir este lançamento financeiro?")){finance=finance.filter(a=>a.id!==id);saveData();renderFinance();showToast("Lançamento excluído.");}
-}
+document.querySelectorAll(".nav button[data-page]").forEach(btn=>btn.addEventListener("click",()=>{document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active");const page=btn.dataset.page;document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));$(page+"Page").classList.remove("hidden");const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro"};$("pageTitle").textContent=titles[page]||"Painel";if(page==="secretaria"||page==="documentos")renderDocuments();if(page==="tesouraria"||page==="financeiro")renderFinance()}));
+window.addEventListener("keydown",e=>{if(e.key==="Escape"){["memberModal","workerModal","documentModal","financeModal"].forEach(closeModal)}});
 
-function getVal(id){return document.getElementById(id).value.trim()}
-function setVal(id,v){document.getElementById(id).value=v||""}
-function closeModal(id){document.getElementById(id).classList.add("hidden")}
-
-window.addEventListener("keydown",e=>{if(e.key==="Escape"){closeModal("memberModal");closeModal("workerModal")}});
-
-if(localStorage.getItem("igreja_user")) login();
+async function init(){
+ if(!SUPABASE_CONFIGURED){setAuthMessage("⚠️ Falta configurar SUPABASE_URL e SUPABASE_KEY no index.html.",true);return}
+ const {data:{session}}=await sb.auth.getSession();
+ if(session){currentUser=session.user;await enterApp()}
+ sb.auth.onAuthStateChange(async(event,session)=>{if(session&&!currentUser){currentUser=session.user;await enterApp()}});
+}
+init();
 </script>
+
 </body>
 </html>
