@@ -115,10 +115,10 @@ th{background:#f9fafb}
       <button class="primary" type="submit">ENTRAR</button>
     </form>
     <div style="display:flex;gap:8px;margin-top:12px">
-      <button type="button" id="showSignupBtn" class="btn btn-light" style="flex:1">Criar conta</button>
+      
       <button type="button" id="forgotBtn" class="btn btn-light" style="flex:1">Esqueci a senha</button>
     </div>
-    <div id="authMessage" class="demo">Conecte seu projeto Supabase para usar o sistema online.</div>
+    <div id="authMessage" class="demo">Somente o Administrador pode criar novas contas. Use seu e-mail e senha para entrar.</div>
   </div>
 </section>
 
@@ -137,6 +137,8 @@ th{background:#f9fafb}
       <div class="section-title">Tesouraria</div>
       <button data-page="tesouraria">💰 Tesouraria</button>
       <button data-page="financeiro">📊 Financeiro</button>
+      <div class="section-title admin-only">Administração</div>
+      <button data-page="usuarios" class="admin-only">👤 Usuários e acessos</button>
     </nav>
     <button id="logoutBtn" class="nav button logout">🚪 Sair</button>
   </aside>
@@ -163,6 +165,7 @@ th{background:#f9fafb}
         </div>
         <div id="recentList"></div>
       </div>
+      <footer style="text-align:center;padding:28px 10px 12px;color:#6b7280;font-size:13px;">Desenvolvido por <strong style="color:#1f2937;">Isaias Melo</strong></footer>
     </div>
 
     <!-- MEMBROS -->
@@ -274,6 +277,32 @@ th{background:#f9fafb}
         </table></div>
       </div>
     </div>
+
+    <!-- USUÁRIOS E ACESSOS -->
+    <div id="usuariosPage" class="page hidden">
+      <div class="panel">
+        <div class="panel-head"><h3>Usuários e níveis de acesso</h3><span class="badge active">Somente Administrador</span></div>
+        <p style="color:#6b7280">Somente o administrador pode criar contas e definir o que cada usuário poderá acessar.</p>
+        <form id="userForm">
+          <div class="form-grid">
+            <div class="field"><label>Nome *</label><input id="uNome" required placeholder="Nome do usuário"></div>
+            <div class="field"><label>E-mail *</label><input id="uEmail" type="email" required placeholder="usuario@igreja.com"></div>
+            <div class="field"><label>Senha inicial *</label><input id="uPassword" type="password" minlength="6" required placeholder="Mínimo 6 caracteres"></div>
+            <div class="field"><label>Nível de acesso *</label><select id="uRole" required>
+              <option value="secretaria">Secretaria — somente Secretaria e Documentos</option>
+              <option value="tesouraria">Tesouraria — somente Tesouraria e Financeiro</option>
+              <option value="pastor">Pastor — acesso geral</option>
+              <option value="admin">Administrador — acesso total</option>
+            </select></div>
+          </div>
+          <div class="modal-actions"><button class="btn btn-dark" type="submit">+ Criar usuário</button></div>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Contas cadastradas</h3></div>
+        <div class="table-wrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Nível</th><th>Ação</th></tr></thead><tbody id="usersTable"></tbody></table></div>
+      </div>
+    </div>
   </main>
 </section>
 
@@ -376,8 +405,8 @@ th{background:#f9fafb}
    3) Cole abaixo o Project URL e a Publishable key.
    NUNCA coloque a service_role key neste arquivo.
 ========================================================== */
-const SUPABASE_URL = "https://ssgbhbgazaczhnepcxbr.supabase.co";
-const SUPABASE_KEY = "sb_publishable_oMGfy0ojp2VErf20doidmA_UsIZ3qpc";
+const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SEU_PROJETO";
+const SUPABASE_KEY = "COLE_AQUI_A_PUBLISHABLE_KEY";
 const SUPABASE_CONFIGURED = !SUPABASE_URL.includes("COLE_AQUI") && !SUPABASE_KEY.includes("COLE_AQUI");
 const sb = SUPABASE_CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}
@@ -396,6 +425,40 @@ function brl(v){return Number(v||0).toLocaleString("pt-BR",{style:"currency",cur
 function today(){return new Date().toISOString().slice(0,10)}
 function dbError(error){console.error(error);showToast(error?.message||"Erro ao acessar o banco de dados.")}
 
+let currentRole=null;
+const ROLE_LABELS={admin:"Administrador",pastor:"Pastor",secretaria:"Secretaria",tesouraria:"Tesouraria"};
+const ROLE_PAGES={
+  admin:["dashboard","membros","obreiros","secretaria","documentos","tesouraria","financeiro","usuarios"],
+  pastor:["dashboard","membros","obreiros","secretaria","documentos","tesouraria","financeiro"],
+  secretaria:["secretaria","documentos"],
+  tesouraria:["tesouraria","financeiro"]
+};
+function canAccess(page){return (ROLE_PAGES[currentRole]||[]).includes(page)}
+function applyPermissions(){
+  document.querySelectorAll(".nav button[data-page]").forEach(btn=>{
+    const allowed=canAccess(btn.dataset.page);
+    btn.classList.toggle("hidden",!allowed);
+  });
+  document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",currentRole!=="admin"));
+  const allowed=ROLE_PAGES[currentRole]||["dashboard"];
+  document.querySelectorAll(".page").forEach(p=>{const page=p.id.replace("Page","");if(!allowed.includes(page))p.classList.add("hidden")});
+  const first=allowed[0]||"dashboard";
+  document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
+  const firstBtn=document.querySelector(`.nav button[data-page="${first}"]`); if(firstBtn)firstBtn.classList.add("active");
+  document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));
+  const firstPage=$(first+"Page"); if(firstPage)firstPage.classList.remove("hidden");
+  const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro",usuarios:"Usuários e acessos"};
+  $("pageTitle").textContent=titles[first]||"Painel";
+  $("loggedUser").textContent=(currentUser?.email||"Usuário")+" • "+(ROLE_LABELS[currentRole]||"Usuário");
+}
+
+async function loadRole(){
+  const {data,error}=await sb.from("user_roles").select("role").eq("user_id",currentUser.id).maybeSingle();
+  if(error)throw error;
+  currentRole=data?.role||null;
+  if(!currentRole)throw new Error("Seu usuário ainda não possui um nível de acesso. Peça ao administrador para definir seu perfil.");
+}
+
 async function signIn(){
  if(!sb){setAuthMessage("Configure as chaves do Supabase no index.html primeiro.",true);return}
  const email=$("loginEmail").value.trim(), password=$("loginPassword").value;
@@ -406,13 +469,7 @@ async function signIn(){
 }
 
 async function signUp(){
- if(!sb){setAuthMessage("Configure as chaves do Supabase no index.html primeiro.",true);return}
- const email=$("loginEmail").value.trim(), password=$("loginPassword").value;
- if(!email||password.length<6){setAuthMessage("Informe um e-mail e uma senha com pelo menos 6 caracteres.",true);return}
- const {data,error}=await sb.auth.signUp({email,password});
- if(error){setAuthMessage(error.message,true);return}
- if(data.session){currentUser=data.user;await enterApp();}
- else setAuthMessage("Conta criada. Verifique seu e-mail para confirmar o cadastro.");
+  setAuthMessage("Somente o Administrador pode criar novas contas. Procure o administrador da igreja.",true);
 }
 
 async function resetPassword(){
@@ -428,24 +485,63 @@ async function resetPassword(){
 async function logout(){if(sb)await sb.auth.signOut();currentUser=null;location.reload()}
 
 async function enterApp(){
- $("loginScreen").classList.add("hidden");$("app").classList.remove("hidden");
- $("loggedUser").textContent=currentUser?.email||"Usuário";
- await loadAll();
+  try{
+    await loadRole();
+    $("loginScreen").classList.add("hidden");$("app").classList.remove("hidden");
+    applyPermissions();
+    await loadAll();
+    if(currentRole==="admin") await loadUsers();
+  }catch(e){
+    console.error(e);
+    if(sb) await sb.auth.signOut();
+    currentUser=null;
+    $("app").classList.add("hidden");$("loginScreen").classList.remove("hidden");
+    setAuthMessage(e.message||"Não foi possível carregar seu perfil de acesso.",true);
+  }
 }
 
 async function loadAll(){
- try{
-  const [m,w,d,f]=await Promise.all([
-   sb.from("members").select("*").order("created_at",{ascending:false}),
-   sb.from("workers").select("*").order("created_at",{ascending:false}),
-   sb.from("documents").select("*").order("created_at",{ascending:false}),
-   sb.from("finance_entries").select("*").order("date",{ascending:false}).order("created_at",{ascending:false})
-  ]);
-  if(m.error)throw m.error;if(w.error)throw w.error;if(d.error)throw d.error;if(f.error)throw f.error;
-  members=m.data||[];workers=w.data||[];documents=d.data||[];finance=f.data||[];
-  renderMembers();renderWorkers();renderDocuments();renderFinance();updateDashboard();
- }catch(e){dbError(e)}
+  try{
+    const req=[];
+    if(canAccess("membros")||canAccess("dashboard")) req.push(sb.from("members").select("*").order("created_at",{ascending:false}).then(r=>({key:"members",...r})));
+    else members=[];
+    if(canAccess("obreiros")||canAccess("dashboard")) req.push(sb.from("workers").select("*").order("created_at",{ascending:false}).then(r=>({key:"workers",...r})));
+    else workers=[];
+    if(canAccess("secretaria")||canAccess("documentos")) req.push(sb.from("documents").select("*").order("created_at",{ascending:false}).then(r=>({key:"documents",...r})));
+    else documents=[];
+    if(canAccess("tesouraria")||canAccess("financeiro")) req.push(sb.from("finance_entries").select("*").order("date",{ascending:false}).order("created_at",{ascending:false}).then(r=>({key:"finance",...r})));
+    else finance=[];
+    const results=await Promise.all(req);
+    for(const r of results){if(r.error)throw r.error;if(r.key==="members")members=r.data||[];if(r.key==="workers")workers=r.data||[];if(r.key==="documents")documents=r.data||[];if(r.key==="finance")finance=r.data||[]}
+    renderMembers();renderWorkers();renderDocuments();renderFinance();updateDashboard();
+  }catch(e){dbError(e)}
 }
+
+async function loadUsers(){
+  const {data,error}=await sb.from("user_roles_view").select("user_id,email,nome,role,created_at").order("created_at",{ascending:false});
+  if(error){dbError(error);return}
+  const body=$("usersTable");if(!body)return;
+  body.innerHTML=(data||[]).map(u=>`<tr><td>${escapeHtml(u.nome||"-")}</td><td>${escapeHtml(u.email||"-")}</td><td><span class="badge ${u.role==="admin"?"active":"obreiro"}">${escapeHtml(ROLE_LABELS[u.role]||u.role)}</span></td><td>${u.user_id===currentUser.id?"Usuário atual":"<button class=\"btn-light\" onclick=\"changeUserRole('"+u.user_id+"')\">Alterar nível</button>"}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">Nenhum usuário encontrado.</td></tr>`;
+}
+
+async function createManagedUser(e){
+  e.preventDefault();
+  if(currentRole!=="admin"){showToast("Somente o administrador pode criar usuários.");return}
+  const payload={nome:getVal("uNome"),email:getVal("uEmail"),password:getVal("uPassword"),role:getVal("uRole")};
+  try{
+    const {data,error}=await sb.functions.invoke("create-user",{body:payload});
+    if(error)throw error;
+    if(data?.error)throw new Error(data.error);
+    $("userForm").reset();showToast("Usuário criado com sucesso.");await loadUsers();
+  }catch(e){dbError(e)}
+}
+
+async function changeUserRole(userId){
+  const role=prompt("Digite: admin, pastor, secretaria ou tesouraria");
+  if(!["admin","pastor","secretaria","tesouraria"].includes(role))return;
+  try{const {error}=await sb.from("user_roles").update({role}).eq("user_id",userId);if(error)throw error;showToast("Nível alterado.");await loadUsers()}catch(e){dbError(e)}
+}
+
 
 function updateDashboard(){
  const ativos=members.filter(x=>x.situacao==="Ativo").length;
@@ -495,8 +591,9 @@ document.getElementById("memberForm").addEventListener("submit",saveMember);
 document.getElementById("workerForm").addEventListener("submit",saveWorker);
 document.getElementById("documentForm").addEventListener("submit",saveDocument);
 document.getElementById("financeForm").addEventListener("submit",saveFinance);
+document.getElementById("userForm").addEventListener("submit",createManagedUser);
 
-document.querySelectorAll(".nav button[data-page]").forEach(btn=>btn.addEventListener("click",()=>{document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active");const page=btn.dataset.page;document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));$(page+"Page").classList.remove("hidden");const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro"};$("pageTitle").textContent=titles[page]||"Painel";if(page==="secretaria"||page==="documentos")renderDocuments();if(page==="tesouraria"||page==="financeiro")renderFinance()}));
+document.querySelectorAll(".nav button[data-page]").forEach(btn=>btn.addEventListener("click",async()=>{const page=btn.dataset.page;if(!canAccess(page))return;document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active");document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));$(page+"Page").classList.remove("hidden");const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro",usuarios:"Usuários e acessos"};$("pageTitle").textContent=titles[page]||"Painel";if(page==="secretaria"||page==="documentos")renderDocuments();if(page==="tesouraria"||page==="financeiro")renderFinance();if(page==="usuarios")await loadUsers()}));
 window.addEventListener("keydown",e=>{if(e.key==="Escape"){["memberModal","workerModal","documentModal","financeModal"].forEach(closeModal)}});
 
 async function init(){
