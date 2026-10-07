@@ -405,8 +405,8 @@ th{background:#f9fafb}
    3) Cole abaixo o Project URL e a Publishable key.
    NUNCA coloque a service_role key neste arquivo.
 ========================================================== */
-const SUPABASE_URL = "https://ssgbhbgazaczhnepcxbr.supabase.co";
-const SUPABASE_KEY = "sb_publishable_oMGfy0ojp2VErf20doidmA_UsIZ3qpc";
+const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SEU_PROJETO";
+const SUPABASE_KEY = "COLE_AQUI_A_PUBLISHABLE_KEY";
 const SUPABASE_CONFIGURED = !SUPABASE_URL.includes("COLE_AQUI") && !SUPABASE_KEY.includes("COLE_AQUI");
 const sb = SUPABASE_CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}
@@ -486,17 +486,34 @@ async function logout(){if(sb)await sb.auth.signOut();currentUser=null;location.
 
 async function enterApp(){
   try{
+    if(!currentUser) throw new Error("Sessão de usuário não encontrada.");
     await loadRole();
-    $("loginScreen").classList.add("hidden");$("app").classList.remove("hidden");
+    $("loginScreen").classList.add("hidden");
+    $("app").classList.remove("hidden");
     applyPermissions();
     await loadAll();
     if(currentRole==="admin") await loadUsers();
   }catch(e){
-    console.error(e);
-    if(sb) await sb.auth.signOut();
-    currentUser=null;
-    $("app").classList.add("hidden");$("loginScreen").classList.remove("hidden");
-    setAuthMessage(e.message||"Não foi possível carregar seu perfil de acesso.",true);
+    console.error("Erro ao carregar o sistema ADMC:",e);
+    // Não encerra a sessão automaticamente. Um erro de RLS, tabela ou Edge Function
+    // não deve deslogar o administrador nem apagar a sessão do navegador.
+    if(currentUser){
+      $("loginScreen").classList.add("hidden");
+      $("app").classList.remove("hidden");
+      if(!currentRole) currentRole="none";
+      applyPermissions();
+      showToast(e.message||"Não foi possível carregar seu perfil de acesso.");
+      const title=$("pageTitle");
+      if(title) title.textContent="Acesso não configurado";
+      const firstPage=document.querySelector(".page:not(.hidden)");
+      if(firstPage){
+        firstPage.innerHTML='<div class="panel"><div class="panel-head"><h3>Não foi possível carregar seu acesso</h3></div><p style="color:#b91c1c;line-height:1.6">'+escapeHtml(e.message||"Verifique as configurações do Supabase e tente novamente.")+'</p><p style="color:#6b7280">Sua sessão continua ativa. Corrija a configuração e atualize a página.</p></div>';
+      }
+    }else{
+      $("app").classList.add("hidden");
+      $("loginScreen").classList.remove("hidden");
+      setAuthMessage(e.message||"Não foi possível carregar seu perfil de acesso.",true);
+    }
   }
 }
 
@@ -518,9 +535,19 @@ async function loadAll(){
 }
 
 async function loadUsers(){
+  const body=$("usersTable");
+  if(!body)return;
+  if(currentRole!=="admin"){
+    body.innerHTML='<tr><td colspan="4" class="empty">Somente o Administrador pode visualizar os usuários.</td></tr>';
+    return;
+  }
   const {data,error}=await sb.from("user_roles_view").select("user_id,email,nome,role,created_at").order("created_at",{ascending:false});
-  if(error){dbError(error);return}
-  const body=$("usersTable");if(!body)return;
+  if(error){
+    console.error("Erro ao carregar usuários:",error);
+    body.innerHTML='<tr><td colspan="4" style="color:#b91c1c;padding:18px">Não foi possível carregar a lista de usuários. Verifique se a tabela/view <strong>user_roles_view</strong> foi criada no Supabase.</td></tr>';
+    showToast(error.message||"Erro ao carregar usuários.");
+    return;
+  }
   body.innerHTML=(data||[]).map(u=>`<tr><td>${escapeHtml(u.nome||"-")}</td><td>${escapeHtml(u.email||"-")}</td><td><span class="badge ${u.role==="admin"?"active":"obreiro"}">${escapeHtml(ROLE_LABELS[u.role]||u.role)}</span></td><td>${u.user_id===currentUser.id?"Usuário atual":"<button class=\"btn-light\" onclick=\"changeUserRole('"+u.user_id+"')\">Alterar nível</button>"}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">Nenhum usuário encontrado.</td></tr>`;
 }
 
@@ -528,11 +555,18 @@ async function createManagedUser(e){
   e.preventDefault();
   if(currentRole!=="admin"){showToast("Somente o administrador pode criar usuários.");return}
   const payload={nome:getVal("uNome"),email:getVal("uEmail"),password:getVal("uPassword"),role:getVal("uRole")};
+  if(payload.password.length<6){showToast("A senha inicial precisa ter pelo menos 6 caracteres.");return}
   try{
     const {data,error}=await sb.functions.invoke("create-user",{body:payload});
-    if(error)throw error;
+    if(error){
+      const msg=error.message||"Não foi possível criar o usuário.";
+      if(msg.toLowerCase().includes("failed to send a request")||msg.toLowerCase().includes("not found")||msg.toLowerCase().includes("404")) throw new Error("A função create-user ainda não foi publicada no Supabase. Configure a Edge Function create-user e faça o Deploy.");
+      throw error;
+    }
     if(data?.error)throw new Error(data.error);
-    $("userForm").reset();showToast("Usuário criado com sucesso.");await loadUsers();
+    $("userForm").reset();
+    showToast("Usuário criado com sucesso.");
+    await loadUsers();
   }catch(e){dbError(e)}
 }
 
@@ -593,7 +627,7 @@ document.getElementById("documentForm").addEventListener("submit",saveDocument);
 document.getElementById("financeForm").addEventListener("submit",saveFinance);
 document.getElementById("userForm").addEventListener("submit",createManagedUser);
 
-document.querySelectorAll(".nav button[data-page]").forEach(btn=>btn.addEventListener("click",async()=>{const page=btn.dataset.page;if(!canAccess(page))return;document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active");document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));$(page+"Page").classList.remove("hidden");const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro",usuarios:"Usuários e acessos"};$("pageTitle").textContent=titles[page]||"Painel";if(page==="secretaria"||page==="documentos")renderDocuments();if(page==="tesouraria"||page==="financeiro")renderFinance();if(page==="usuarios")await loadUsers()}));
+document.querySelectorAll(".nav button[data-page]").forEach(btn=>btn.addEventListener("click",async()=>{const page=btn.dataset.page;if(!canAccess(page))return;document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));btn.classList.add("active");document.querySelectorAll(".page").forEach(p=>p.classList.add("hidden"));$(page+"Page").classList.remove("hidden");const titles={dashboard:"Painel",membros:"Membros",obreiros:"Obreiros",secretaria:"Secretaria",documentos:"Documentos",tesouraria:"Tesouraria",financeiro:"Financeiro",usuarios:"Usuários e acessos"};$("pageTitle").textContent=titles[page]||"Painel";if(page==="secretaria"||page==="documentos")renderDocuments();if(page==="tesouraria"||page==="financeiro")renderFinance();if(page==="usuarios"){try{await loadUsers()}catch(e){console.error(e);showToast(e.message||"Erro ao carregar usuários.")}}}));
 window.addEventListener("keydown",e=>{if(e.key==="Escape"){["memberModal","workerModal","documentModal","financeModal"].forEach(closeModal)}});
 
 async function init(){
