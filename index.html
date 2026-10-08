@@ -405,8 +405,8 @@ th{background:#f9fafb}
    3) Cole abaixo o Project URL e a Publishable key.
    NUNCA coloque a service_role key neste arquivo.
 ========================================================== */
-const SUPABASE_URL = "https://ssgbhbgazaczhnepcxbr.supabase.co";
-const SUPABASE_KEY = "sb_publishable_oMGfy0ojp2VErf20doidmA_UsIZ3qpc";
+const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SEU_PROJETO";
+const SUPABASE_KEY = "COLE_AQUI_A_PUBLISHABLE_KEY";
 const SUPABASE_CONFIGURED = !SUPABASE_URL.includes("COLE_AQUI") && !SUPABASE_KEY.includes("COLE_AQUI");
 const sb = SUPABASE_CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:true}
@@ -491,13 +491,13 @@ async function enterApp(){
     $("loginScreen").classList.add("hidden");
     $("app").classList.remove("hidden");
     applyPermissions();
-    await loadAll();
-    if(currentRole==="admin") await loadUsers();
+    // Carregamento dos dados não pode impedir a navegação do sistema.
+    try{ await loadAll(); }catch(e){ console.error("Falha ao carregar dados:",e); showToast(e?.message||"Alguns dados não puderam ser carregados."); }
+    if(currentRole==="admin"){ try{ await loadUsers(); }catch(e){ console.error("Falha ao carregar usuários:",e); } }
   }catch(e){
     console.error("Erro ao carregar o sistema ADMC:",e);
-    // Não encerra a sessão automaticamente. Um erro de RLS, tabela ou Edge Function
-    // não deve deslogar o administrador nem apagar a sessão do navegador.
-    if(currentUser){
+    // Nunca encerra a sessão por erro de banco/permissão.
+    if(currentUser && currentRole){
       $("loginScreen").classList.add("hidden");
       $("app").classList.remove("hidden");
       if(!currentRole) currentRole="none";
